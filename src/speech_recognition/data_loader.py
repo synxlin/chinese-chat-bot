@@ -66,6 +66,8 @@ class NoiseInjection(object):
     def inject_noise_sample(self, data, noise_path, noise_level):
         noise_len = get_audio_length(noise_path)
         data_len = len(data) / self.sample_rate
+        if noise_len < data_len:
+             return data
         noise_start = np.random.rand() * (noise_len - data_len)
         noise_end = noise_start + data_len
         noise_dst = audio_with_sox(noise_path, self.sample_rate, noise_start, noise_end)

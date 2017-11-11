@@ -260,8 +260,8 @@ def validate(val_loader, model, decoder, epoch):
 
         torch.cuda.synchronize()
         del out
-    wer = total_wer / len(test_loader.dataset)
-    cer = total_cer / len(test_loader.dataset)
+    wer = total_wer / len(val_loader.dataset)
+    cer = total_cer / len(val_loader.dataset)
     wer *= 100
     cer *= 100
 

@@ -98,6 +98,8 @@ ENV/
 /site
 
 # deepspeech.pytorch-specific dirs
-models/
-data/*.csv
-data/*_dataset/
+*.csv
+*.sh
+data/*dataset/
+checkpoints/
+logs/
