@@ -22,7 +22,7 @@ def add_optimization_options(parser):
                         type=float, metavar='M', help='momentum')
     parser.add_argument('--wd', '--weight-decay', dest='weight_decay',
                         type=float, metavar='WD', help='weight decay')
-    parser.add_argument('--lr-anneal', dest='lr_anneal', type=float, metavar='LR_ANNEAL',
+    parser.add_argument('--lr-anneal', type=float, metavar='LR_ANNEAL',
                         help='every epoch, learning rate decays by lr_anneal')
     parser.add_argument('--max-norm', type=int,
                         help='Norm cutoff to prevent explosion of gradients')
@@ -49,7 +49,7 @@ def add_data_options(parser):
                         help='Window stride for spectrogram in seconds')
     parser.add_argument('--window', default='hamming',
                         help='Window type for spectrogram generation')
-    parser.add_argument('--augment', dest='augment', default=False, action='store_true',
+    parser.add_argument('--augment', default=False, action='store_true',
                         help='Use random tempo and gain perturbations.')
     parser.add_argument('--noise-dir', default=None,
                         help='Directory to inject noise into audio.'
@@ -80,7 +80,7 @@ def add_train_options(parser):
                         help='use pre-trained model')
     parser.add_argument('--pf', '--print-freq', dest='print_freq', default=10,
                         type=int, metavar='T', help='print frequency (default: 10)')
-    parser.add_argument('--visdom', dest='visdom', default=False, action='store_true',
+    parser.add_argument('--visdom', default=False, action='store_true',
                         help='Turn on visdom graphing')
 
 

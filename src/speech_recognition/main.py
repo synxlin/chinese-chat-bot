@@ -1,5 +1,4 @@
-import argparse
-import errno
+import shutil
 import json
 import os
 import time
@@ -8,11 +7,9 @@ import torch
 from torch.autograd import Variable
 from warpctc_pytorch import CTCLoss
 
-from data.data_loader import AudioDataLoader, SpectrogramDataset, BucketingSampler
-from decoder import GreedyDecoder
+from data_loader import AudioDataLoader, SpectrogramDataset, BucketingSampler
+from decoder import *
 from model import DeepSpeech, supported_rnns
-
-from options import *
 from utils import *
 
 options = Options(description='Pytorch DeepSpeech2 Training')
@@ -268,7 +265,7 @@ def validate(val_loader, model, decoder, epoch):
     wer *= 100
     cer *= 100
 
-    print('Validation Summary Epoch: [{0}]\tAverage WER {wer:.3f}\t'
+    print('Epoch: [{0}]\tAverage WER {wer:.3f}\t'
           'Average CER {cer:.3f}\t'.format(epoch, wer=wer, cer=cer))
     test_logger.write('{0}\t{1}\n'.format(wer, cer))
     return wer, cer
