@@ -116,6 +116,9 @@ def create_config(**options):
     config['beam_width'] = options['beam_width'] if 'beam_width' in options else 10
     config['lm_path'] = options['lm_path'] if 'lm_path' in options else None
     config['lm_alpha'] = options['lm_alpha'] if 'lm_alpha' in options else 0.8
+    config['resume'] = options['resume'] if 'resume' in options else ''
+    config['pretrained'] = options['pretrained'] if 'pretrained' in options else ''
+    config['evaluate'] = options['evaluate'] if 'evaluate' in options else False
 
     config_str = 'Training Config:\n'
     for key, val in config.items():
@@ -128,8 +131,11 @@ def create_config(**options):
     print('saving to %s' % alg_id)
     print('='*89)
 
-    config['checkpoint_dir'] = os.path.join('checkpoints', alg_id)
-    config['log_dir'] = os.path.join('logs', alg_id)
+    if config['evaluate']:
+        config['log_dir'] = os.path.join('evaluate', alg_id)
+    else:
+        config['log_dir'] = os.path.join('logs', alg_id)
+        config['checkpoint_dir'] = os.path.join('checkpoints', alg_id)
     config['experiment_id'] = alg_id
     config['config_str'] = config_str
 

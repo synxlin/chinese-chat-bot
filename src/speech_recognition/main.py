@@ -22,25 +22,25 @@ def main():
     global args, train_logger, test_logger
     args = options.parse_args()
     os.makedirs(args.log_dir)
-    os.makedirs(args.checkpoint_dir)
-    train_logger = Logger(os.path.join(args.log_dir, 'train.log'))
     test_logger = Logger(os.path.join(args.log_dir, 'test.log'))
     with open(os.path.join(args.log_dir, 'config.log'), 'w') as f:
         f.write(args.config_str)
-    loss_results, cer_results, wer_results = torch.FloatTensor(args.epochs), \
-                                             torch.FloatTensor(args.epochs), \
-                                             torch.FloatTensor(args.epochs)
+    if not args.evaluate:
+        os.makedirs(args.checkpoint_dir)
+        train_logger = Logger(os.path.join(args.log_dir, 'train.log'))
+    loss_results, cer_results = torch.FloatTensor(args.epochs), torch.FloatTensor(args.epochs)
+
     if args.visdom:
         from visdom import Visdom
         viz = Visdom()
         opts = dict(title=args.experiment_id, ylabel='', xlabel='Epoch', 
-                    legend=['Loss', 'WER', 'CER'])
+                    legend=['Loss', 'CER'])
         viz_windows = None
         epochs = torch.arange(0, args.epochs)
 
     if args.resume:
         print('Loading checkpoint model %s' % args.resume)
-        checkpoint = torch.load(args.resume, map_location=lambda storage, loc: storage)
+        checkpoint = torch.load(args.resume)
         model = DeepSpeech.load_model_checkpoint(checkpoint)
         model = torch.nn.DataParallel(model, device_ids=[i for i in range(args.nGPU)]).cuda()
         labels = DeepSpeech.get_labels(model)
@@ -50,21 +50,17 @@ def main():
                                     momentum=args.momentum, nesterov=True)
         optimizer.load_state_dict(checkpoint['optimizer'])
         start_epoch = int(checkpoint.get('epoch', 0))  # Index start at 0 for training
-        loss_results, cer_results, wer_results = checkpoint['loss_results'], checkpoint[
-                                                 'cer_results'], checkpoint['wer_results']
+        loss_results, cer_results = checkpoint['loss_results'], checkpoint['cer_results']
         if args.epochs > loss_results.numel():
             loss_results.resize_(args.epochs)
-            wer_results.resize_(args.epochs)
             cer_results.resize_(args.epochs)
             loss_results[start_epoch:].zero_()
-            wer_results[start_epoch:].zero_()
             cer_results[start_epoch:].zero_()
         # Add previous scores to visdom graph
         if args.visdom and loss_results is not None:
             x_axis = epochs[0:start_epoch]
             y_axis = torch.stack(
-                (loss_results[0:start_epoch], wer_results[0:start_epoch],
-                 cer_results[0:start_epoch]),
+                (loss_results[0:start_epoch], cer_results[0:start_epoch]),
                 dim=1)
             viz_window = viz.line(
                 X=x_axis,
@@ -95,50 +91,50 @@ def main():
                                     momentum=args.momentum, nesterov=True)
 
     # define loss function (criterion) and decoder
-    best_wer = None
+    best_cer = None
     criterion = CTCLoss()
     decoder = GreedyDecoder(labels)
+
+    # define dataloader
     if not args.evaluate:
         train_dataset = SpectrogramDataset(audio_conf=audio_conf,
                                            manifest_filepath=args.train_manifest,
                                            labels=labels, normalize=True, augment=args.augment)
+        train_sampler = BucketingSampler(train_dataset, batch_size=args.batch_size)
+        train_loader = AudioDataLoader(train_dataset,
+                                       num_workers=args.num_workers, batch_sampler=train_sampler)
+        if not args.in_order and start_epoch != 0:
+            print("Shuffling batches for the following epochs")
+            train_sampler.shuffle()
     val_dataset = SpectrogramDataset(audio_conf=audio_conf, manifest_filepath=args.val_manifest,
                                       labels=labels, normalize=True, augment=False)
-    train_sampler = BucketingSampler(train_dataset, batch_size=args.batch_size)
-    train_loader = AudioDataLoader(train_dataset,
-                                   num_workers=args.num_workers, batch_sampler=train_sampler)
     val_loader = AudioDataLoader(val_dataset, batch_size=args.batch_size,
                                   num_workers=args.num_workers)
 
-    if not args.in_order and start_epoch != 0:
-        print("Shuffling batches for the following epochs")
-        train_sampler.shuffle()
-
-    
     print(model)
     print("Number of parameters: %d" % DeepSpeech.get_param_size(model))
 
     if args.evaluate:
+        validate(val_loader, model, decoder, 0)
         return
 
     for epoch in range(start_epoch, args.epochs):
         avg_loss = train(train_loader, train_sampler, model, criterion, optimizer, epoch)
-        wer, cer = validate(val_loader, model, decoder, epoch)
+        cer = validate(val_loader, model, decoder, epoch)
 
         loss_results[epoch] = avg_loss
-        wer_results[epoch] = wer
         cer_results[epoch] = cer
 
         adjust_learning_rate(optimizer)
 
         is_best = False
-        if best_wer is None or best_wer > wer:
+        if best_cer is None or best_cer > cer:
             print('Found better validated model')
-            best_wer = wer
+            best_cer = cer
             is_best = True
         save_checkpoint(DeepSpeech.serialize(model, optimizer=optimizer, epoch=epoch,
-                                             loss_results=loss_results, wer_results=wer_results,
-                                             cer_results=cer_results), is_best, epoch)
+                                             loss_results=loss_results, cer_results=cer_results),
+                        is_best, epoch)
 
         if not args.in_order:
             print("Shuffling batches...")
@@ -146,7 +142,7 @@ def main():
 
         if args.visdom:
             x_axis = epochs[0:epoch + 1]
-            y_axis = torch.stack((loss_results[0:epoch + 1], wer_results[0:epoch + 1], cer_results[0:epoch + 1]), dim=1)
+            y_axis = torch.stack((loss_results[0:epoch + 1], cer_results[0:epoch + 1]), dim=1)
             if viz_window is None:
                 viz_window = viz.line(
                     X=x_axis,
@@ -223,15 +219,15 @@ def train(train_loader, train_sampler, model, criterion, optimizer, epoch):
           'Time {batch_time.avg:.3f}\tData {data_time.avg:.3f}\t'.format(
             epoch, loss=avg_loss, batch_time=batch_time,
             data_time=data_time))
-    train_logger.write('{0}\t{1}\t{2}\t{3}\t{4}\n'.format(
-        0, 0, avg_loss, batch_time.avg, data_time.avg))
+    train_logger.write('{0}\t{1}\t{2}\t{3}\n'.format(
+        0, avg_loss, batch_time.avg, data_time.avg))
     return avg_loss
 
 
 def validate(val_loader, model, decoder, epoch):
-    total_cer, total_wer = 0, 0
+    total_cer = 0
     model.eval()
-    for i, (data) in enumerate(val_loader):  # test
+    for i, (data) in enumerate(val_loader):
         inputs, targets, input_percentages, target_sizes = data
 
         inputs = Variable(inputs, volatile=True).cuda()
@@ -249,26 +245,18 @@ def validate(val_loader, model, decoder, epoch):
 
         decoded_output, _, _, _ = decoder.decode(out.data, sizes)
         target_strings = decoder.convert_to_strings(split_targets)
-        wer, cer = 0, 0
+        cer = 0
         for x in range(len(target_strings)):
-            wer += decoder.wer(decoded_output[0][x], target_strings[x]) / \
-                    float(len(target_strings[x].split()))
             cer += decoder.cer(decoded_output[0][x], target_strings[x]) / \
                     float(len(target_strings[x]))
         total_cer += cer
-        total_wer += wer
 
         torch.cuda.synchronize()
         del out
-    wer = total_wer / len(val_loader.dataset)
-    cer = total_cer / len(val_loader.dataset)
-    wer *= 100
-    cer *= 100
-
-    print('Epoch: [{0}]\tAverage WER {wer:.3f}\t'
-          'Average CER {cer:.3f}\t'.format(epoch, wer=wer, cer=cer))
-    test_logger.write('{0}\t{1}\n'.format(wer, cer))
-    return wer, cer
+    cer = total_cer / len(val_loader.dataset) * 100
+    print('Epoch: [{0}]\tAverage CER {cer:.3f}\t'.format(epoch, cer=cer))
+    test_logger.write('{0}\n'.format(cer))
+    return cer
 
 
 def adjust_learning_rate(optimizer):

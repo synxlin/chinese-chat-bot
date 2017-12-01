@@ -197,7 +197,7 @@ class DeepSpeech(nn.Module):
 
     @staticmethod
     def serialize(model, optimizer=None, epoch=None, loss_results=None,
-                  cer_results=None, wer_results=None, meta=None):
+                  cer_results=None, meta=None):
         model_is_cuda = next(model.parameters()).is_cuda
         model = model.module if model_is_cuda else model
         checkpoint = {
@@ -217,7 +217,6 @@ class DeepSpeech(nn.Module):
         if loss_results is not None:
             checkpoint['loss_results'] = loss_results
             checkpoint['cer_results'] = cer_results
-            checkpoint['wer_results'] = wer_results
         if meta is not None:
             checkpoint['meta'] = meta
         return checkpoint
@@ -277,7 +276,6 @@ if __name__ == '__main__':
         print("  Epochs:           ", epochs)
         print("  Current Loss:      {0:.3f}".format(checkpoint['loss_results'][epochs - 1]))
         print("  Current CER:       {0:.3f}".format(checkpoint['cer_results'][epochs - 1]))
-        print("  Current WER:       {0:.3f}".format(checkpoint['wer_results'][epochs - 1]))
 
     if checkpoint.get('meta', None) is not None:
         print("")
