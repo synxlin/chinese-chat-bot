@@ -39,11 +39,11 @@ class SequenceWise(nn.Module):
         return tmpstr
 
 
-class InferenceBatchLogSoftmax(nn.Module):
+class InferenceBatchSoftmax(nn.Module):
     def forward(self, input_):
         if not self.training:
             batch_size = input_.size()[0]
-            return torch.stack([F.log_softmax(input_[i]) for i in range(batch_size)], 0)
+            return torch.stack([F.softmax(input_[i]) for i in range(batch_size)], 0)
         else:
             return input_
 
@@ -167,7 +167,7 @@ class DeepSpeech(nn.Module):
         self.fc = nn.Sequential(
             SequenceWise(fully_connected),
         )
-        self.inference_log_softmax = InferenceBatchLogSoftmax()
+        self.inference_softmax = InferenceBatchSoftmax()
 
     def forward(self, x):
         x = self.conv(x)
@@ -183,15 +183,15 @@ class DeepSpeech(nn.Module):
 
         x = self.fc(x)
         x = x.transpose(0, 1)
-        # identity in training mode, logsoftmax in eval mode
-        x = self.inference_log_softmax(x)
+        # identity in training mode, softmax in eval mode
+        x = self.inference_softmax(x)
         return x
 
     @classmethod
     def load_model_checkpoint(cls, checkpoint):
         model = cls(rnn_hidden_size=checkpoint['hidden_size'], nb_layers=checkpoint['hidden_layers'],
                     labels=checkpoint['labels'], audio_conf=checkpoint['audio_conf'],
-                    rnn_type=supported_rnns[checkpoint['rnn_type']], bidirectional=checkpoint['bidirectional'])
+                    rnn_type=supported_rnns[checkpoint['rnn_type']], bidirectional=checkpoint.get('bidirectional', True))
         model.load_state_dict(checkpoint['state_dict'])
         return model
 
@@ -241,6 +241,17 @@ class DeepSpeech(nn.Module):
         model_is_cuda = next(model.parameters()).is_cuda
         return model.module._audio_conf if model_is_cuda else model._audio_conf
 
+    @staticmethod
+    def get_meta(model):
+        model_is_cuda = next(model.parameters()).is_cuda
+        m = model.module if model_is_cuda else model
+        meta = {
+            "version": m._version,
+            "hidden_size": m._hidden_size,
+            "hidden_layers": m._hidden_layers,
+            "rnn_type": supported_rnns_inv[m._rnn_type]
+        }
+        return meta
 
 if __name__ == '__main__':
     import os.path

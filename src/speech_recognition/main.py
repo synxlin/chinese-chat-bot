@@ -6,6 +6,7 @@ import time
 import torch
 from torch.autograd import Variable
 from warpctc_pytorch import CTCLoss
+from tqdm import tqdm
 
 from data_loader import AudioDataLoader, SpectrogramDataset, BucketingSampler
 from decoder import *
@@ -227,7 +228,7 @@ def train(train_loader, train_sampler, model, criterion, optimizer, epoch):
 def validate(val_loader, model, decoder, epoch):
     total_cer = 0
     model.eval()
-    for i, (data) in enumerate(val_loader):
+    for i, (data) in tqdm(enumerate(val_loader), total=len(val_loader)):
         inputs, targets, input_percentages, target_sizes = data
 
         inputs = Variable(inputs, volatile=True).cuda()
@@ -243,12 +244,12 @@ def validate(val_loader, model, decoder, epoch):
         seq_length = out.size(0)
         sizes = input_percentages.mul_(int(seq_length)).int()
 
-        decoded_output, _, _, _ = decoder.decode(out.data, sizes)
+        decoded_output, _ = decoder.decode(out.data, sizes)
         target_strings = decoder.convert_to_strings(split_targets)
         cer = 0
         for x in range(len(target_strings)):
-            cer += decoder.cer(decoded_output[0][x], target_strings[x]) / \
-                    float(len(target_strings[x]))
+            transcript, reference = decoded_output[x][0], target_strings[x][0]
+            cer += decoder.cer(transcript, reference) / float(len(reference))
         total_cer += cer
 
         torch.cuda.synchronize()
