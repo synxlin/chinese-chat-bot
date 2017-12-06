@@ -154,6 +154,9 @@ class Options:
     def set_defaults(self, **kwargs):
         self.parser.set_defaults(**kwargs)
 
+    def add_argument(self, *args, **kwargs):
+        self.parser.add_argument(*args, **kwargs)
+
     def parse_args(self, *args):
         args = self.parser.parse_args(*args)
         for k, v in vars(args).items():

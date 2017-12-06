@@ -143,6 +143,86 @@ class BeamCTCDecoder(Decoder):
         return strings, offsets
 
 
+class BeamDecoder(Decoder):
+    """docstring for BeamDecoder"""
+    def __init__(self, labels, lm_path=None, alpha=0, beam_width=100, blank_index=0):
+        super(BeamDecoder, self).__init__(labels)
+        try:
+            import kenlm
+            import math
+            import copy
+        except ImportError:
+            raise ImportError("BeamDecoder requires kenlm package.")
+        self.lm = kenlm.Model(lm_path)
+        self.alpha, self.beam_width = alpha * math.log(10), beam_width
+
+    def process_string(self, seq_probs, seq_ids, size, remove_repetitions=False):
+        beam_width, alpha = self.beam_width, self.alpha
+        strings = [''] * beam_width
+        offsets = [[] for _ in range(beam_width)]
+        prev_idx = [0] * beam_width
+        ctc_scores = [0] * beam_width
+        for i in range(size):  # seq
+
+            tmp_strings, tmp_offsets, tmp_prev_idx, tmp_ctc_scores, tmp_scores = [], [], [], [], []
+            for j in range(beam_width):  # prev
+                for k in range(beam_width):  # now
+                    string = strings[j]
+                    offset = copy.copy(offsets[j])
+                    ctc_score = ctc_scores[j]
+                    char_idx = seq_ids[i][k]  # seq_ids shape of seq_length x output_dim(beam_width)
+                    if char_idx != self.blank_index:
+                        # if this char_idx is a repetition and remove_repetitions=true, then skip
+                        if remove_repetitions and i != 0 and char_idx == prev_idx[j]:
+                            pass
+                        elif char_idx == self.space_index:
+                            string += ' '
+                            offset.append(i)
+                        else:
+                            string += self.int_to_char[char_idx]
+                            offset.append(i)
+                    ctc_score += seq_probs[i][k]
+                    score = ctc_score + self.lm.score(string, bos=False, eos=False) * alpha
+                    tmp_strings.append(string)
+                    tmp_offsets.append(offset)
+                    tmp_prev_idx.append(char_idx)
+                    tmp_ctc_scores.append(ctc_score)
+                    tmp_scores.append(score)
+            beam_ids = sorted(range(len(tmp_scores)), key=lambda k: tmp_scores[k], reverse=True)
+            beam_ids = beam_ids[:beam_width]
+            strings = [tmp_strings[k] for k in beam_ids]
+            offsets = [tmp_offsets[k] for k in beam_ids]
+            prev_idx = [tmp_prev_idx[k] for k in beam_ids]
+            ctc_scores = [tmp_ctc_scores[k] for k in beam_ids]
+        string = strings[0]
+        offset = offsets[0]
+        return string, torch.IntTensor(offset)
+
+    def decode(self, probs, sizes=None):
+        """
+        Returns the argmax decoding given the probability matrix. Removes
+        repeated elements in the sequence, as well as blanks.
+
+        Arguments:
+            probs: Tensor of character probabilities from the network. Expected shape of seq_length x batch x output_dim
+            sizes(optional): Size of each sequence in the mini-batch
+        Returns:
+            strings: sequences of the model's best guess for the transcription on inputs
+            offsets: time step per character predicted
+        """
+        topk_probs, topk_ids = torch.topk(probs.transpose(0,1), self.beam_width, dim=2, largest=True, sorted=True)
+        topk_probs, topk_ids = topk_probs.cpu(), topk_ids.cpu()
+        batch_size = topk_probs.size(0)
+        strings, offsets = [], []
+        for x in xrange(batch_size):
+        # score = self.lm.score(data, bos=False, eos=False) * math.log(10)
+            seq_len = sizes[x] if sizes is not None else len(topk_probs[x])
+            string, string_offsets = self.process_string(topk_probs[x], topk_ids[x], seq_len, remove_repetitions=True)
+            strings.append([string])
+            offsets.append([string_offsets])
+        return strings, offsets
+
+
 class GreedyDecoder(Decoder):
     def __init__(self, labels, blank_index=0):
         super(GreedyDecoder, self).__init__(labels, blank_index)
@@ -175,7 +255,7 @@ class GreedyDecoder(Decoder):
                     string += ' '
                     offsets.append(i)
                 else:
-                    string = string + self.int_to_char[char_idx]
+                    string += self.int_to_char[char_idx]
                     offsets.append(i)
         return string, torch.IntTensor(offsets)
 
